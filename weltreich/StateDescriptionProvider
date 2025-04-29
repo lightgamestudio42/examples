@@ -1,0 +1,81 @@
+using System.Collections;
+using System.Collections.Generic;
+using System.Text;
+using Weltreich.Characters;
+using UnityEngine;
+using Weltreich.State;
+using CharacterController = Weltreich.Characters.CharacterController;
+
+public class StateDescriptionProvider
+{
+    private StateBase state;
+
+    public StateDescriptionProvider(StateBase state)
+    {
+        this.state = state;
+    }
+
+    public StringBuilder GetBaseDescription()
+    {
+        StringBuilder result = new(state.GetSelfName() + "\n");
+
+        result.Append(GetPoliticalInfo())
+              .Append(state.Society.GetDescription())
+              .Append(state.Economy.GetDescription())
+              .Append(AddStateParameter("worldInfo_energy", state.TotalEnergy.RoundToDecimal()));
+
+        var soldiersCount = state.BuildingController.Soldiers.Count;
+        result.Append(TryAddStateParameter(soldiersCount > 0, "worldInfo_soldiers", ": " + soldiersCount))
+            .Append(TryAddStateParameter(state.PlayerType == PlayerType.AI, "worldInfo_ecology", state.Ecology));
+
+        return result;
+    }
+
+    public StringBuilder GetPoliticalInfo()
+    {
+        StringBuilder result = new();
+
+        result.Append(AddStateParameter("worldInfo_area", state.Territory.CountHexes()))
+            .Append(AddStateParameter("worldInfo_militarism", state.MilitaryRate))
+            .Append(AddStateParameter("worldInfo_approvalRating", state.Politics.Rating + "%"));
+
+        if (state.Politics.Enemies.Count > 0)
+        {
+            StringBuilder enemiesList = new();
+            foreach (var enemy in state.Politics.Enemies)
+            {
+                enemiesList.AppendFormat($"{enemy.GetSelfName()}; ");
+            }
+
+            result.Append(AddStateParameter("worldInfo_enemies", " " + enemiesList));
+        }
+
+        if (CharacterController.Instance.TryGet(out Joe joe))
+        {
+            result.Append(TryAddStateParameter(state.PlayerType == PlayerType.Human && joe,
+                "worldInfo_oppositionApprovalRating", joe.Rating + "%"));
+        }
+
+        result.Append(TryAddStateParameter(state.PlayerType == PlayerType.AI, "worldInfo_cooperationRate", state.GetRelationsScore(Geopolitics.Instance.GetState<Reich>())));
+
+        return result;
+    }
+
+
+    private StringBuilder TryAddStateParameter<T>(bool condition, string key, T t)
+    {
+        if (condition)
+            return AddStateParameter<T>(key, t);
+
+        return new StringBuilder();
+    }
+
+    private StringBuilder AddStateParameter<T>(string key, T t)
+    {
+        StringBuilder result = new();
+        result.AppendLine();
+        result.AppendFormat($"{Localization.GetString(key)}: {t}");
+
+        return result;
+    }
+}
