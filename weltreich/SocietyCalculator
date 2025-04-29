@@ -1,0 +1,108 @@
+using System.Linq;
+using UnityEngine;
+using Weltreich.State;
+
+public class SocietyCalculator
+{
+    private Society society;
+    private Law law;
+    private SocietyConfig cfg;
+    private StateBase state;
+    private Politics Politics => state.Politics;
+
+    private float deathCoefficient;
+    private float birthCoefficient;
+
+    public SocietyCalculator(Society society, Law law, SocietyConfig cfg, StateBase state, Politics politics)
+    {
+        this.society = society;
+        this.cfg = cfg;
+        this.law = law;
+        this.state = state;
+    }
+
+    public void CalculatePopulationGrowth(float birthCoefficient, float deathCoefficient)
+    {
+        this.deathCoefficient = deathCoefficient;
+        this.birthCoefficient = birthCoefficient;
+        var born = CalculatePeopleBorn();
+        var migrants = CalculateMigrantsArrived();
+        var diedFromAge = CalculateDeathsFromAge();
+        var diedFromWars = CalculateDeathsFromWars();
+        var diedFromMurders = CalculateMurders();
+        var diedFromEpidemies = state.medicine.DailyDeathsFromEpidemies();
+
+        PopulationDynamics.Income income = new(born, migrants);
+        PopulationDynamics.Outcome outcome = new(diedFromWars, diedFromMurders, diedFromAge, diedFromEpidemies);
+
+        var todayDynamics = new PopulationDynamics(income, outcome);
+
+        society.TodayDynamics = todayDynamics;
+    }
+
+    public int CalculatePeopleBorn()
+    {
+        float ecologyImpact = 1f + state.Ecology * cfg.birthImpactEcology;
+        ecologyImpact = Mathf.Clamp(ecologyImpact, cfg.minBirthImpactEcology, cfg.maxBirthImpactEcology);
+
+        int born = 1 + Mathf.RoundToInt(ecologyImpact * birthCoefficient * society.Population * Random.Range(0.9f, 1.1f));
+        return born; //1.8% - 3.78%
+    }
+
+    private void MultiplyBirtIf(bool condition, float multiplier, ref int born)
+    {
+        if (condition)
+        {
+            born = Mathf.RoundToInt(born * multiplier);
+        }
+    }
+
+    private int CalculateMigrantsArrived()
+    {
+        int migrants = 0;
+
+        if (state.PlayerType == PlayerType.Human)
+        {
+            var states = Geopolitics.Instance.BordersManagersMgr.GetBorderingStates(state);
+            foreach (var state in states)
+            {
+                migrants += CalculateMigrantsArrived(state);
+            }
+        }
+
+        return migrants;
+    }
+
+    private int CalculateMigrantsArrived(StateBase other)
+    {
+        float value = other.Society.Population * 0.02f * Random.Range(0, 1.5f);
+        return Mathf.RoundToInt(value);
+    }
+
+    public int CalculateDeathsFromAge()
+    {
+        float delta = 1 + 
+                      0.01f * society.Population 
+                            * (1 + Random.Range(deathCoefficient * 0.3f, deathCoefficient));
+
+        return Mathf.RoundToInt(delta);
+    }
+
+    private int CalculateMurders()
+    {
+        int result = 0;
+        float todayRate = Random.Range(society.CrimeRate * 0.5f, society.CrimeRate);
+        result += Mathf.RoundToInt(society.Population / (100f / todayRate));
+
+        return result;
+    }
+
+    private int CalculateDeathsFromWars()
+    {
+        int result = 0;
+
+        result += Politics.Enemies.Count * Random.Range(1, 2);
+
+        return result;
+    }
+}
