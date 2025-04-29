@@ -1,0 +1,76 @@
+using System;
+using System.Collections;
+using Cysharp.Threading.Tasks;
+using TMPro;
+using UnityEngine;
+using UnityEngine.UI;
+using Weltreich.Offers;
+using Zenject;
+using Random = UnityEngine.Random;
+
+namespace Weltreich.UI
+{
+    public class InformationMenu : QuittableMenu
+    {
+        [SerializeField] private GameObject informationBoard;
+        [SerializeField] private TextMeshProUGUI text;
+        [SerializeField] private Button closeButton;
+
+        private OffersController offerController;
+        private RectTransform rect;
+
+        [Inject]
+        private void Construct(OffersController offerController)
+        {
+            this.offerController = offerController;
+        }
+
+
+        private void OnEnable()
+        {
+            closeButton.onClick.AddListener(Hide);
+        }
+
+        private void OnDisable()
+        {
+            closeButton.onClick.RemoveListener(Hide);
+        }
+
+        public void Show(string key, bool doLocalize = true)
+        {
+            ShowAsync(key, doLocalize).Forget();
+        }
+
+        public async UniTask Show(string key, float deltaTime, bool doLocalize = true)
+        {
+            await UniTask.Delay(TimeSpan.FromSeconds(deltaTime));
+            await ShowAsync(key, doLocalize);
+        }
+
+        private async UniTask ShowAsync(string key, bool doLocalize = true)
+        {
+            LevelUI.Instance.ShowDarkenBackground();
+            LevelAudio.Instance.Play(SoundType.ShowOffer);
+
+            text.text = "";
+            informationBoard.SetActive(true);
+            offerController.CanShowOffer = false;
+            rect = informationBoard.GetComponent<RectTransform>();
+            await DOTweenVisualEffects.TransformDown(rect, 0.5f);
+
+            var info = doLocalize ? Localization.GetInfo(key) : key;
+
+            await info.Print(text);
+        }
+
+
+        public override void Hide()
+        {
+            LevelAudio.Instance.Play(SoundType.ClickDecline);
+            LevelUI.Instance.HideDarkenBackground();
+            informationBoard.SetActive(false);
+            offerController.CanShowOffer = true;
+            base.Hide();
+        }
+    }
+}
