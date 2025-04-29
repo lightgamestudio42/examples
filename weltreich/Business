@@ -1,0 +1,85 @@
+using UnityEngine;
+using System;
+using Weltreich.Building;
+using Random = UnityEngine.Random;
+
+public enum BusinessArea
+{
+    Food,
+    Culture,
+    Medicine,
+    Production,
+    Trading
+}
+
+public class BusinessConfig
+{
+    public readonly string selfName;
+    public readonly string nameKey;
+    public readonly int maxDailyRevenue;
+    public int capital = 1;
+    public readonly BusinessArea area;
+    public float riskPercent;
+}
+
+public class Business
+{
+    private Func<bool> CanEarnMoney;
+    private Func<int> CalculateGrossRevenue;
+
+    public readonly string selfName;
+    public readonly string key;
+    private readonly int maxDailyRevenue;
+    public int capital = 1;
+    public readonly BusinessArea area;
+    private float riskPercent;
+
+    public readonly IJuridicalPerson owner;
+    public Building place;
+
+    public Business(string key, int maxDailyRevenue, float riskPercent, Character owner, BusinessArea businessArea,
+        Func<bool> checkConditionFunction, Func<int> calculateRevenue = null)
+    {
+        this.key = key;
+        this.maxDailyRevenue = maxDailyRevenue;
+        this.riskPercent = riskPercent;
+        CanEarnMoney = checkConditionFunction;
+        this.owner = owner;
+        area = businessArea;
+        selfName = Localization.GetString("business_" + this.key);
+
+        CalculateGrossRevenue = calculateRevenue ?? CalculateRevenueDefault;
+    }
+
+    public int TickAndGetTax(float tax)
+    {
+        if (!CanEarnMoney())
+        {
+            return 0;
+        }
+
+        int gross = CalculateGrossRevenue();
+        int taxDeduction = Mathf.RoundToInt(gross * tax);
+        int net = gross - taxDeduction;
+        capital += net;
+
+        return taxDeduction;
+    }
+
+    public void CalculateRevenueGross()
+    {
+    }
+
+    private int CalculateRevenueDefault()
+    {
+        float riskToday = (1.0f - riskPercent) * Random.Range(0.65f, 1.2f);
+        riskToday = Mathf.Clamp(riskToday, 0.00f, 1.00f);
+        int revenue = Random.Range(Mathf.RoundToInt(maxDailyRevenue * riskToday), maxDailyRevenue);
+
+        return revenue;
+    }
+
+    public void Bankruptcy()
+    {
+    }
+}
