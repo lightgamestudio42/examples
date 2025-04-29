@@ -1,0 +1,206 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using Better.Attributes.Runtime;
+using Better.Attributes.Runtime.Manipulation;
+using Wardrobe.Layers;
+using UnityEngine;
+using UnityEngine.Events;
+
+namespace Wardrobe
+{
+    public enum OpenSource
+    {
+        Menu,
+        Novel
+    }
+
+    public class CharacterModel : MonoBehaviour
+    {
+        [Header("Кликать Get Children Layers при каждом обновлении персонажа")] [SerializeField] [ReadOnly] private CharacterLayer[] allChildren;
+
+        private UnityAction<string> onAppearanceChanged;
+
+        private Dictionary<SelectionMode, LayerGroup> groups = new();
+        private LayerGroup currentGroup;
+
+        private DressingData lastSessionDressed;
+        private bool isInitialized;
+
+        private CharacterData Data => WardrobeController.Instance.Data;
+        public CharacterLayer CurrentLayer => currentGroup.CurrentLayer;
+        public int CurrentItemPrice => CurrentLayer.Price;
+        public string CurrentItemName => Localization.Get(CurrentLayer.NameKey);
+        private List<LayerGroup> Groups => groups.Values.ToList();
+
+#if UNITY_EDITOR
+        [EditorButton("Get Children Layers")]
+        private void GetChildrenLayers()
+        {
+            allChildren = GetComponentsInChildren<CharacterLayer>();
+        }
+#endif
+
+        public void Show(WardrobeViewData wdData = null)
+        {
+            if (!isInitialized)
+                Initialize();
+
+            ResetEquipped();
+            Groups.ForEach(HideAllLayers);
+            ShowOwnedLayers();
+
+            if (wdData != null)
+            {
+                ShowExclusiveLayers(wdData);
+            }
+
+            CheckAndShowHairstyleBack();
+        }
+
+        private void ShowExclusiveLayers(WardrobeViewData data)
+        {
+            GetGroup(data.ExclusiveLayers.mode).RevealExclusiveLayers(data.ExclusiveLayers.layers);
+        }
+
+        private void Initialize()
+        {
+            lastSessionDressed = Data.LastDressing;
+            FindLayers();
+
+            isInitialized = true;
+        }
+
+        public void Close()
+        {
+            Groups.ForEach(HideEquippedLayer);
+            Groups.ForEach(g => g.Closed());
+        }
+
+        public void SaveDressed()
+        {
+            var currentlyDressed = new DressingData(GetGroup(SelectionMode.Race).LayerToSave,
+                GetGroup(SelectionMode.Hairstyle).LayerToSave,
+                GetGroup(SelectionMode.Outfit).LayerToSave,
+                GetGroup(SelectionMode.Accessories).LayerToSave);
+
+            Data.Save(currentlyDressed, WardrobeController.Instance.PurchasedItems, WardrobeController.Instance.UnlockedItems);
+            Groups.ForEach(g => g.Save());
+        }
+
+        private void FindLayers()
+        {
+            groups = new()
+            {
+                { SelectionMode.Race, CreateLayerGroup(allChildren, SelectionMode.Race) },
+                { SelectionMode.Hairstyle, CreateLayerGroup(allChildren, SelectionMode.Hairstyle, ShowCurrentHairstyleBack) },
+                { SelectionMode.Outfit, CreateLayerGroup(allChildren, SelectionMode.Outfit) },
+                { SelectionMode.Accessories, CreateLayerGroup(allChildren, SelectionMode.Accessories) },
+                { SelectionMode.HairslyleBack, CreateLayerGroup(allChildren, SelectionMode.HairslyleBack, commonLayer: false) }
+            };
+        }
+
+        private void ShowCurrentHairstyleBack()
+        {
+            if (currentGroup == null)
+            {
+                return;
+            }
+
+            if (currentGroup != null && currentGroup.CurrentLayer.LayerType != SelectionMode.Hairstyle) return;
+            CheckAndShowHairstyleBack();
+        }
+
+        public void CheckAndShowHairstyleBack()
+        {
+            int equid = groups[SelectionMode.Hairstyle].EquippedId;
+            if (groups[SelectionMode.HairslyleBack].DoesContain(equid))
+            {
+                groups[SelectionMode.HairslyleBack].OwnedId = equid;
+                groups[SelectionMode.HairslyleBack].ShowOwned();
+            }
+            else
+            {
+                groups[SelectionMode.HairslyleBack].HideEquipped();
+            }
+        }
+
+        public void OnLayersUpdated()
+        {
+            if (!isInitialized) return;
+
+            lastSessionDressed = Data.LastDressing;
+            foreach (var mode in GetEnumList<SelectionMode>())
+            {
+                UpdateEquipped(mode);
+            }
+
+            void UpdateEquipped(SelectionMode mode)
+            {
+                groups[mode].OwnedId = Data.LastDressing.GetVar(mode);
+            }
+
+            List<TEnum> GetEnumList<TEnum>() where TEnum : Enum
+                => ((TEnum[])Enum.GetValues(typeof(TEnum))).ToList();
+        }
+
+        private LayerGroup CreateLayerGroup(IEnumerable<CharacterLayer> allChildren, SelectionMode mode, Action onShow = null, bool commonLayer = true)
+        {
+            var characterLayers = allChildren as CharacterLayer[] ?? allChildren.ToArray();
+            return new LayerGroup(characterLayers.ToList().FindWith(mode), lastSessionDressed.GetVar(mode), onShow, commonLayer);
+        }
+
+        private void ShowOwnedLayers()
+        {
+            Groups.ForEach(g => g.ShowOwned());
+        }
+
+        public void SetNewViewGroup(SelectionMode mode)
+        {
+            currentGroup = GetGroup(mode);
+            ShowEquippedLayer(currentGroup);
+        }
+
+        public void ChangeItem(Step step)
+        {
+            currentGroup.HideEquipped();
+            currentGroup.Switch(step);
+            currentGroup.CurrentLayer.Show();
+        }
+
+        public void ShowEquippedLayer(LayerGroup layerGroup)
+        {
+            currentGroup = layerGroup;
+            currentGroup.Equipped.Show();
+        }
+
+
+        private void ResetEquipped() => Groups.ForEach(l => l.ResetEquipped());
+
+        private void HideEquippedLayer(LayerGroup group) => group.HideEquipped();
+
+        private void HideAllLayers(LayerGroup group) => group.layers.ForEach(l => l.Hide());
+
+        private LayerGroup GetGroup(SelectionMode mode)
+        {
+            return groups[mode];
+        }
+    }
+
+    public static class Extensions
+    {
+        public static IEnumerable<CharacterLayer> FindWith(this List<CharacterLayer> children, SelectionMode mode)
+        {
+            try
+            {
+                return children.FindAll(c => c.LayerType == mode);
+            }
+
+            catch (Exception e)
+            {
+                Debug.LogError($"Нет слоёв с {mode}");
+                throw;
+            }
+        }
+    }
+}
