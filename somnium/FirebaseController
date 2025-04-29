@@ -1,0 +1,79 @@
+using UnityEngine;
+using System;
+using Cysharp.Threading.Tasks;
+using Firebase.Analytics;
+using Firebase;
+using Firebase.Crashlytics;
+
+public enum FirebaseInitializeResult
+{
+    FailedDependencies,
+    FailedDatabase,
+    Succeed
+}
+
+public class FirebaseController : AutoCleanupSingleton<FirebaseController>
+{
+    public Action OnAuthStateChange;
+
+    private FirebaseApp app;
+    private Authentification authentification;
+    private Database database;
+
+    public Database Database => database;
+    public string UID => authentification.Uid;
+    public bool IsAuthenticated => authentification.IsAuthenticated;
+
+    private void Start()
+    {
+        DontDestroyOnLoad(gameObject);
+    }
+
+    /// <summary>
+    /// Инициализация под меню загрузки.
+    /// Первый вход выполнить анонимно, если не залогинен
+    /// Потом инициализировать БД
+    /// </summary>
+    public async UniTask<FirebaseInitializeResult> InitializeAsync()
+    {
+        var dependenciesTask = FirebaseApp.CheckAndFixDependenciesAsync();
+        await dependenciesTask;
+
+        if (dependenciesTask.Result != Firebase.DependencyStatus.Available)
+        {
+            Debug.LogError(System.String.Format("Could not resolve all Firebase dependencies: {0}", dependenciesTask.Result));
+            return FirebaseInitializeResult.FailedDependencies;
+        }
+
+        InitializeAnalytics();
+        InitCrashlytics();
+
+        authentification = new();
+        database = new();
+        await authentification.InitializeAsync(database);
+        authentification.OnStateChange += () => OnAuthStateChange?.Invoke();
+
+        database.Initialize(authentification);
+        var currencyData = await database.LoadCurrency();
+        await Wallet.Instance.Initialize(currencyData);
+
+        return FirebaseInitializeResult.Succeed;
+    }
+
+    private void InitializeAnalytics()
+    {
+        FirebaseAnalytics.SetAnalyticsCollectionEnabled(true);
+        FirebaseAnalytics.SetUserId(SystemInfo.deviceUniqueIdentifier);
+    }
+
+    public void SignInGoogle()
+    {
+        authentification.SignInGoogle();
+    }
+
+
+    private void InitCrashlytics()
+    {
+        Crashlytics.ReportUncaughtExceptionsAsFatal = true;
+    }
+}
