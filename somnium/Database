@@ -1,0 +1,222 @@
+using UnityEngine;
+using System;
+using Firebase.Database;
+using Cysharp.Threading.Tasks;
+using Somnium.Util;
+using System.Threading;
+
+public class Database
+{
+    private DatabaseReference database;
+    private DatabaseReference usersDatabase;
+
+    private DatabaseReference userDatabase;
+    private Authentification auth;
+
+    private string Uid => auth.Uid;
+
+
+    public void Initialize(Authentification auth)
+    {
+        this.auth = auth;
+
+        database = FirebaseDatabase.DefaultInstance.RootReference;
+        usersDatabase = database.Child(Path.Users);
+        auth.OnAnonymousAccountLoggedOut += (id) => UniTask.Action(async () => { await DeleteUser(id); });
+    }
+
+    public async UniTask TryCreateProfileInDatabaseAsync()
+    {
+        var userExist = await UserRecordExist();
+        if (userExist)
+        {
+            return;
+        }
+
+        await CreateProfileInDatabaseAsync();
+    }
+
+
+    public async UniTask CreateProfileInDatabaseAsync()
+    {
+        var t1 = SaveValueAsync(SaveKeys.Tickets, Wallet.Instance.Tickets.Count);
+        var t2 = SaveValueAsync(SaveKeys.Stars, Wallet.Instance.Stars.Count);
+
+        await UniTask.WhenAll(t1, t2);
+    }
+
+    public async UniTask LoadDataFromProfile()
+    {
+        var currencyData = await LoadCurrency();
+        Wallet.Instance.SetNewData(currencyData);
+    }
+
+    public async UniTask<CurrencyData> LoadCurrency()
+    {
+        CurrencyData data = new();
+        bool hasValue = await HasValue(SaveKeys.Stars);
+        if (hasValue)
+        {
+            data.stars = await GetUserIntValueFromDB(SaveKeys.Stars);
+        }
+
+        bool hasValue2 = await HasValue(SaveKeys.Tickets);
+        if (hasValue2)
+        {
+            data.tickets = await GetUserIntValueFromDB(SaveKeys.Tickets);
+        }
+
+        data.hasValue = hasValue && hasValue2;
+        return data;
+    }
+
+    public async UniTask<bool> IsProfitablePurchased()
+    {
+        bool hasValue = await HasValue(SaveKeys.IsProfitablePurchased);
+        if (!hasValue)
+        {
+            return false;
+        }
+
+        var result = await GetUserBoolValueFromDB(SaveKeys.IsProfitablePurchased);
+        return result;
+    }
+
+    public async UniTask DeleteUser(string id)
+    {
+        var targetRef = usersDatabase.Child(Uid);
+        if (targetRef != null)
+        {
+            await usersDatabase.Child(Uid).RemoveValueAsync();
+        }
+    }
+
+    private async UniTask<bool> HasValue(string key)
+    {
+        var snapshot = await GetUserValueReference(key).GetValueAsync();
+        return snapshot.Exists;
+    }
+
+    private async UniTask<bool> GetUserBoolValueFromDB(string key)
+    {
+        var str = await GetUserValueFromDB(key);
+        bool parsed = bool.TryParse(str, out var result);
+        if (!parsed)
+        {
+            throw new Exception($"При чтении БД произошла ошибка: Невозможно преобразовать {str} из {key} в bool");
+        }
+
+        return result;
+    }
+
+    private async UniTask<int> GetUserIntValueFromDB(string key)
+    {
+        var str = await GetUserValueFromDB(key);
+        bool parsed = int.TryParse(str, out var result);
+        if (!parsed)
+        {
+            throw new Exception($"При чтении БД произошла ошибка: Невозможно преобразовать {str} из {key} в int");
+        }
+
+        return result;
+    }
+
+    private async UniTask<string> GetUserValueFromDB(string key)
+    {
+        try
+        {
+            var task = await GetUserValueReference(key).GetValueAsync();
+            return task.GetValue(false).ToString();
+        }
+        catch (Exception e)
+        {
+            throw new Exception($"Произошла ошибка {e} при чтении {key}");
+        }
+    }
+
+    public void SaveValue(string key, int count, Action onFailed = null)
+    {
+        var task = GetUserValueReference(key).SetValueAsync(count);
+        if (task.IsFaulted || task.IsCanceled)
+        {
+            Debug.Log("Save Failed");
+            onFailed?.Invoke();
+        }
+    }
+
+    public async UniTask SaveValueAsync(string key, int count, Action onFailed = null)
+    {
+        var isInternetAvailable = await Utilities.CheckInternetConnection(new CancellationTokenSource());
+        if (!isInternetAvailable)
+        {
+            Debug.Log("Internet is unavailable");
+            onFailed?.Invoke();
+            return;
+        }
+
+        var task = GetUserValueReference(key).SetValueAsync(count);
+        await task;
+        if (task.IsFaulted || task.IsCanceled)
+        {
+            Debug.Log("Save Failed");
+            onFailed?.Invoke();
+        }
+    }
+
+    public async UniTask SaveProfitablePurchaseAsync(string key, bool value)
+    {
+        var isInternetAvailable = await Utilities.CheckInternetConnection(new CancellationTokenSource());
+        if (!isInternetAvailable)
+        {
+            Debug.Log("Internet unavailable");
+            return;
+        }
+
+        var task = GetUserValueReference(key).SetValueAsync(value);
+        await task;
+        if (task.IsFaulted || task.IsCanceled)
+        {
+            Debug.Log("Save Failed");
+        }
+    }
+
+    private DatabaseReference GetUserValueReference(string key)
+    {
+        return usersDatabase.Child(Uid).Child(key);
+    }
+
+    private async UniTask<bool> UserRecordExist()
+    {
+        var task = await usersDatabase.Child(Uid).GetValueAsync();
+        return task.Exists;
+    }
+
+        public class CurrencyData
+    {
+        public bool hasValue;
+        public int stars;
+        public int tickets;
+
+        public CurrencyData()
+        {
+        }
+
+        public CurrencyData(bool hasValue, int stars, int count)
+        {
+            this.hasValue = hasValue;
+            this.stars = stars;
+            this.tickets = count;
+        }
+    }
+
+    public static class Path
+    {
+        public static readonly string Users = "users";
+    }
+
+    public static class Keys
+    {
+        public static readonly string Stars = "stars";
+        public static readonly string Tickets = "tickets";
+    }
+}
